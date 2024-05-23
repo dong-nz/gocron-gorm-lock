@@ -3,10 +3,10 @@ package gormlock
 import (
 	"context"
 	"fmt"
+	"github.com/go-co-op/gocron/v2"
 	"sync/atomic"
 	"time"
 
-	"github.com/go-co-op/gocron"
 	"gorm.io/gorm"
 )
 
@@ -18,11 +18,15 @@ var (
 		}
 	}
 
-	StatusRunning  = "RUNNING"
-	StatusFinished = "FINISHED"
-
 	defaultTTL           = 24 * time.Hour
 	defaultCleanInterval = 5 * time.Second
+)
+
+type JobLockStatus string
+
+const (
+	StatusRunning  JobLockStatus = "RUNNING"
+	StatusFinished JobLockStatus = "FINISHED"
 )
 
 func NewGormLocker(db *gorm.DB, worker string, options ...LockOption) (*GormLocker, error) {

@@ -2,10 +2,12 @@ package gormlock
 
 import (
 	"context"
+	"github.com/go-co-op/gocron/v2"
+	"gorm.io/gorm/logger"
+	"strconv"
 	"testing"
 	"time"
 
-	"github.com/go-co-op/gocron"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -50,7 +52,7 @@ func TestEnableDistributedLocking(t *testing.T) {
 	connStr, err := postgresContainer.ConnectionString(ctx, "sslmode=disable", "application_name=test")
 	assert.NoError(t, err)
 
-	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{Logger: logger.Default.LogMode(logger.Info)})
 	require.NoError(t, err)
 
 	err = db.AutoMigrate(&CronJobLock{})
@@ -64,32 +66,46 @@ func TestEnableDistributedLocking(t *testing.T) {
 
 	l1, err := NewGormLocker(db, "s1")
 	require.NoError(t, err)
-	s1 := gocron.NewScheduler(time.UTC)
-	s1.WithDistributedLocker(l1)
-	_, err = s1.Every("1s").Do(f, 1)
+	s1, err := gocron.NewScheduler(
+		gocron.WithLocation(time.UTC),
+		gocron.WithDistributedLocker(l1))
 	require.NoError(t, err)
+	defer func() { _ = s1.Shutdown() }()
+
+	job, err := s1.NewJob(
+		gocron.DurationJob(time.Second),
+		gocron.NewTask(f, 1))
+	require.NoError(t, err)
+	println("job created", job.ID().String())
 
 	l2, err := NewGormLocker(db, "s2")
 	require.NoError(t, err)
-	s2 := gocron.NewScheduler(time.UTC)
-	s2.WithDistributedLocker(l2)
-	_, err = s2.Every("1s").Do(f, 2)
-	require.NoError(t, err)
+	s2, err := gocron.NewScheduler(
+		gocron.WithLocation(time.UTC),
+		gocron.WithDistributedLocker(l2))
 
-	s1.StartAsync()
-	s2.StartAsync()
+	defer func() { _ = s2.Shutdown() }()
+
+	job2, err := s2.NewJob(gocron.DurationJob(time.Second),
+		gocron.NewTask(f, 2))
+	require.NoError(t, err)
+	println("job created", job2.ID().String())
+
+	s1.Start()
+	s2.Start()
 
 	time.Sleep(3500 * time.Millisecond)
 
-	s1.Stop()
-	s2.Stop()
+	_ = s1.StopJobs()
+	_ = s2.StopJobs()
+
 	close(resultChan)
 
 	var results []int
 	for r := range resultChan {
 		results = append(results, r)
 	}
-	assert.Len(t, results, 4)
+	assert.Len(t, results, 3)
 	var allCronJobs []*CronJobLock
 	db.Find(&allCronJobs)
 	assert.Equal(t, len(results), len(allCronJobs))
@@ -110,7 +126,7 @@ func TestEnableDistributedLocking_DifferentJob(t *testing.T) {
 	connStr, err := postgresContainer.ConnectionString(ctx, "sslmode=disable", "application_name=test")
 	assert.NoError(t, err)
 
-	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{Logger: logger.Default.LogMode(logger.Info)})
 	require.NoError(t, err)
 
 	err = db.AutoMigrate(&CronJobLock{})
@@ -118,50 +134,66 @@ func TestEnableDistributedLocking_DifferentJob(t *testing.T) {
 
 	resultChan := make(chan int, 10)
 	f := func(schedulerInstance int) {
+		println("f", strconv.FormatInt(int64(schedulerInstance), 10), time.Now().Truncate(defaultPrecision).Format("2006-01-02 15:04:05.000"))
 		resultChan <- schedulerInstance
 	}
 
 	result2Chan := make(chan int, 10)
 	f2 := func(schedulerInstance int) {
+		println("f2", strconv.FormatInt(int64(schedulerInstance), 10), time.Now().Truncate(defaultPrecision).Format("2006-01-02 15:04:05.000"))
 		result2Chan <- schedulerInstance
 	}
-
-	s1 := gocron.NewScheduler(time.UTC)
 	l1, err := NewGormLocker(db, "s1")
+	s1, err := gocron.NewScheduler(gocron.WithLocation(time.UTC), gocron.WithDistributedLocker(l1))
 	require.NoError(t, err)
-	s1.WithDistributedLocker(l1)
-	_, err = s1.Every("1s").Name("f").Do(f, 1)
-	require.NoError(t, err)
-	_, err = s1.Every("1s").Name("f2").Do(f2, 1)
-	require.NoError(t, err)
+	defer func() {
+		_ = s1.Shutdown()
+	}()
 
-	s2 := gocron.NewScheduler(time.UTC)
+	job1, err := s1.NewJob(gocron.DurationJob(time.Second), gocron.NewTask(f, 1), gocron.WithName("f"))
+	require.NoError(t, err)
+	println("job created", job1.ID().String())
+	job2, err := s1.NewJob(gocron.DurationJob(time.Second), gocron.NewTask(f2, 1), gocron.WithName("f2"))
+	require.NoError(t, err)
+	println("job created", job2.ID().String())
+
 	l2, err := NewGormLocker(db, "s2")
+	s2, err := gocron.NewScheduler(gocron.WithLocation(time.UTC), gocron.WithDistributedLocker(l2))
 	require.NoError(t, err)
-	s2.WithDistributedLocker(l2)
-	_, err = s2.Every("1s").Name("f").Do(f, 2)
+	defer func() {
+		_ = s2.Shutdown()
+	}()
+	job3, err := s2.NewJob(gocron.DurationJob(time.Second), gocron.NewTask(f, 2), gocron.WithName("f"))
 	require.NoError(t, err)
-	_, err = s2.Every("1s").Name("f2").Do(f2, 2)
+	println("job created", job3.ID().String())
+	job4, err := s2.NewJob(gocron.DurationJob(time.Second), gocron.NewTask(f2, 2), gocron.WithName("f2"))
 	require.NoError(t, err)
+	println("job created", job4.ID().String())
 
-	s3 := gocron.NewScheduler(time.UTC)
 	l3, err := NewGormLocker(db, "s3")
+	s3, err := gocron.NewScheduler(gocron.WithLocation(time.UTC), gocron.WithDistributedLocker(l3))
 	require.NoError(t, err)
-	s3.WithDistributedLocker(l3)
-	_, err = s3.Every("1s").Name("f").Do(f, 3)
-	require.NoError(t, err)
-	_, err = s3.Every("1s").Name("f2").Do(f2, 3)
-	require.NoError(t, err)
+	defer func() {
+		_ = s3.Shutdown()
+	}()
 
-	s1.StartAsync()
-	s2.StartAsync()
-	s3.StartAsync()
+	job5, err := s3.NewJob(gocron.DurationJob(time.Second), gocron.NewTask(f, 3), gocron.WithName("f"))
+	require.NoError(t, err)
+	println("job created", job5.ID().String())
+
+	job6, err := s3.NewJob(gocron.DurationJob(time.Second), gocron.NewTask(f2, 3), gocron.WithName("f2"))
+	require.NoError(t, err)
+	println("job created", job6.ID().String())
+
+	s1.Start()
+	s2.Start()
+	s3.Start()
 
 	time.Sleep(3500 * time.Millisecond)
 
-	s1.Stop()
-	s2.Stop()
-	s3.Stop()
+	_ = s1.StopJobs()
+	_ = s2.StopJobs()
+	_ = s3.StopJobs()
 	close(resultChan)
 	close(result2Chan)
 
@@ -169,12 +201,12 @@ func TestEnableDistributedLocking_DifferentJob(t *testing.T) {
 	for r := range resultChan {
 		results = append(results, r)
 	}
-	assert.Len(t, results, 4, "f is expected 4 times")
+	assert.Len(t, results, 3, "f is expected 3 times")
 	var results2 []int
 	for r := range result2Chan {
 		results2 = append(results2, r)
 	}
-	assert.Len(t, results2, 4, "f2 is expected 4 times")
+	assert.Len(t, results2, 3, "f2 is expected 3 times")
 	var allCronJobs []*CronJobLock
 	db.Find(&allCronJobs)
 	assert.Equal(t, len(results)+len(results2), len(allCronJobs))
@@ -212,9 +244,9 @@ func TestJobReturningExceptionWhenUnique(t *testing.T) {
 	require.NoError(t, db.Create(cjb).Error)
 
 	l, _ := NewGormLocker(db, "local", WithDefaultJobIdentifier(precision))
-	_, lerr := l.Lock(ctx, "job")
-	if assert.Error(t, lerr) {
-		assert.ErrorContains(t, lerr, "violates unique constraint")
+	_, err = l.Lock(ctx, "job")
+	if assert.Error(t, err) {
+		assert.ErrorContains(t, err, "violates unique constraint")
 	}
 }
 
@@ -242,17 +274,17 @@ func TestHandleTTL(t *testing.T) {
 	l1, err := NewGormLocker(db, "s1", WithTTL(1*time.Second))
 	require.NoError(t, err)
 
-	s1 := gocron.NewScheduler(time.UTC)
-	s1.WithDistributedLocker(l1)
+	s1, err := gocron.NewScheduler(gocron.WithLocation(time.UTC), gocron.WithDistributedLocker(l1))
 
-	_, err = s1.Every("1s").Do(func() {})
+	job5, err := s1.NewJob(gocron.DurationJob(time.Second), gocron.NewTask(func() {}), gocron.WithName("f"))
 	require.NoError(t, err)
+	println("job created", job5.ID().String())
 
-	s1.StartAsync()
+	s1.Start()
 
 	time.Sleep(3500 * time.Millisecond)
 
-	s1.Stop()
+	_ = s1.StopJobs()
 
 	var allCronJobs []*CronJobLock
 	db.Find(&allCronJobs)
