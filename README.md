@@ -24,27 +24,37 @@ import (
 )
 
 func main() {
-	var db * gorm.DB // gorm db connection
-	var worker string // name of this instance to be used to know which instance run the job
+	var db *gorm.DB                // gorm db connection
+	var worker string              // name of this instance to be used to know which instance run the job
 	db.AutoMigrate(&CronJobLock{}) // We need the table to store the job execution
 	locker, err := gormlock.NewGormLocker(db, worker)
 	if err != nil {
 		// handle the error
 	}
 
-	s := gocron.NewScheduler(time.UTC)
-	s.WithDistributedLocker(locker)
+	s := gocron.NewScheduler(gocron.WithLocation(time.UTC), gocron.WithDistributedLocker(locker))
+	defer func() { _ = s.Shutdown() }()
 
-	_, err = s.Every("1s").Name("unique_name").Do(func() {
-		// task to do
-		fmt.Println("call 1s")
-	})
+	job, err := s.NewJob(
+		gocron.DurationJob(time.Second),
+		gocron.NewTask(func() {
+			// task to do
+			fmt.Println("call 1s")
+		}),
+		gocron.WithName("f"),
+	)
 	if err != nil {
 		// handle the error
 	}
 
-	s.StartBlocking()
+	s.Start()
+
+	err = s.StopJobs()
+	if err != nil {
+		// handle the error
+	}
 }
+
 ```
 
 ## Prerequisites

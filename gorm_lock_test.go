@@ -227,7 +227,7 @@ func TestJobReturningExceptionWhenUnique(t *testing.T) {
 	connStr, err := postgresContainer.ConnectionString(ctx, "sslmode=disable", "application_name=test")
 	assert.NoError(t, err)
 
-	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{Logger: logger.Default.LogMode(logger.Info)})
 	require.NoError(t, err)
 
 	err = db.AutoMigrate(&CronJobLock{})

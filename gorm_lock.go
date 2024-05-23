@@ -77,7 +77,7 @@ type GormLocker struct {
 }
 
 func (g *GormLocker) cleanExpiredRecords() {
-	g.db.Where("updated_at < ? and status = ?", time.Now().Add(-g.ttl), StatusFinished).Delete(&CronJobLock{})
+	g.db.Unscoped().Where("updated_at < ? and status = ?", time.Now().UTC().Add(-g.ttl).UnixMilli(), StatusFinished).Delete(&CronJobLock{})
 }
 
 func (g *GormLocker) Close() {
@@ -105,7 +105,7 @@ var _ gocron.Lock = (*gormLock)(nil)
 
 type gormLock struct {
 	db *gorm.DB
-	id int
+	id uint64
 }
 
 func (g *gormLock) Unlock(_ context.Context) error {

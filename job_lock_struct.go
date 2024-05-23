@@ -7,22 +7,30 @@ type JobLock[T any] interface {
 	SetJobIdentifier(ji string)
 }
 
-var _ JobLock[int] = (*CronJobLock)(nil)
+var _ JobLock[uint64] = (*CronJobLock)(nil)
 
 type CronJobLock struct {
-	ID            int
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	JobName       string        `gorm:"index:idx_name,unique"`
-	JobIdentifier string        `gorm:"index:idx_name,unique"`
-	Worker        string        `gorm:"not null;default:null"`
-	Status        JobLockStatus `gorm:"not null;default:null"`
+	ID            uint64        `gorm:"primaryKey,autoIncrement"`
+	CreatedAt     int64         `gorm:"autoCreateTime:milli"`
+	UpdatedAt     int64         `gorm:"autoUpdateTime:milli"`
+	JobName       string        `gorm:"size:256;index:idx_name,unique"`
+	JobIdentifier string        `gorm:"size:256;index:idx_name,unique"`
+	Worker        string        `gorm:"size:256;not null"`
+	Status        JobLockStatus `gorm:"size:10;not null"`
+}
+
+func (cjb *CronJobLock) GetCreateAt() time.Time {
+	return time.UnixMilli(cjb.CreatedAt)
+}
+
+func (cjb *CronJobLock) GetUpdateAt() time.Time {
+	return time.UnixMilli(cjb.UpdatedAt)
 }
 
 func (cjb *CronJobLock) SetJobIdentifier(ji string) {
 	cjb.JobIdentifier = ji
 }
 
-func (cjb *CronJobLock) GetID() int {
+func (cjb *CronJobLock) GetID() uint64 {
 	return cjb.ID
 }
