@@ -10,16 +10,21 @@ import (
 	"gorm.io/gorm"
 )
 
+type NowFunc func() time.Time
+
 var (
 	defaultPrecision     = time.Second
-	defaultJobIdentifier = func(precision time.Duration) func(ctx context.Context, key string) string {
+	defaultJobIdentifier = func(nowFunc NowFunc, precision time.Duration) func(ctx context.Context, key string) string {
 		return func(ctx context.Context, key string) string {
-			return time.Now().Truncate(precision).Format("2006-01-02 15:04:05.000")
+			return nowFunc().Truncate(precision).Format("2006-01-02 15:04:05.000")
 		}
 	}
 
-	defaultTTL           = 24 * time.Hour
-	defaultCleanInterval = 5 * time.Second
+	defaultTTL                   = 24 * time.Hour
+	defaultCleanInterval         = 5 * time.Second
+	defaultNowFunc       NowFunc = func() time.Time {
+		return time.Now().UTC()
+	}
 )
 
 type JobLockStatus string
@@ -42,10 +47,16 @@ func NewGormLocker(db *gorm.DB, worker string, options ...LockOption) (*GormLock
 		worker:   worker,
 		ttl:      defaultTTL,
 		interval: defaultCleanInterval,
+		nowFunc:  defaultNowFunc,
 	}
-	gl.jobIdentifier = defaultJobIdentifier(defaultPrecision)
+
 	for _, option := range options {
 		option(gl)
+	}
+
+	// make sure job identifier function uses nowFunc the same as gorm config
+	if gl.jobIdentifier == nil {
+		gl.jobIdentifier = defaultJobIdentifier(gl.nowFunc, defaultPrecision)
 	}
 
 	go func() {
@@ -72,12 +83,13 @@ type GormLocker struct {
 	ttl           time.Duration
 	interval      time.Duration
 	jobIdentifier func(ctx context.Context, key string) string
+	nowFunc       func() time.Time
 
 	closed atomic.Bool
 }
 
 func (g *GormLocker) cleanExpiredRecords() {
-	g.db.Unscoped().Where("updated_at < ? and status = ?", time.Now().UTC().Add(-g.ttl).UnixMilli(), StatusFinished).Delete(&CronJobLock{})
+	g.db.Unscoped().Where("updated_at < ? and status = ?", g.nowFunc().Add(-g.ttl).UnixMilli(), StatusFinished).Delete(&CronJobLock{})
 }
 
 func (g *GormLocker) Close() {

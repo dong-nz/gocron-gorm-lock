@@ -237,13 +237,15 @@ func TestJobReturningExceptionWhenUnique(t *testing.T) {
 	// creating an entry to force the unique identifier error
 	cjb := &CronJobLock{
 		JobName:       "job",
-		JobIdentifier: time.Now().Truncate(precision).Format("2006-01-02 15:04:05.000"),
+		JobIdentifier: time.Now().UTC().Truncate(precision).Format("2006-01-02 15:04:05.000"),
 		Worker:        "local",
 		Status:        StatusRunning,
 	}
 	require.NoError(t, db.Create(cjb).Error)
 
-	l, _ := NewGormLocker(db, "local", WithDefaultJobIdentifier(precision))
+	l, _ := NewGormLocker(db, "local", WithDefaultJobIdentifier(func() time.Time {
+		return time.Now().UTC()
+	}, precision))
 	_, err = l.Lock(ctx, "job")
 	if assert.Error(t, err) {
 		assert.ErrorContains(t, err, "violates unique constraint")

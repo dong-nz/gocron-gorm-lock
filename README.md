@@ -1,13 +1,14 @@
 # gocron-gorm-lock
+
 A gocron locker implementation using gorm
 
-## install
+## Install
 
 ```
 go get github.com/dong-nz/gocron-gorm-lock
 ```
 
-## usage
+## Usage
 
 Here is an example usage that would be deployed in multiple instances
 
@@ -25,18 +26,25 @@ import (
 )
 
 func main() {
-	connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d", "localhost", "postgres", "postgres", "bifrost", 5432)
-	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{Logger: logger.Default.LogMode(logger.Info), NowFunc: func() time.Time {
-		return time.Now().UTC()
-	}})
+	connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d", "localhost", "postgres", "postgres", "demo", 5433)
+	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{Logger: logger.Default.LogMode(logger.Info)})
 
+	//, NowFunc: func() time.Time {
+	//		return time.Now().UTC()
+	//	}
 	// We need the table to store the job execution
 	err = db.AutoMigrate(&gormlock.CronJobLock{})
 	if err != nil {
 		// handle the error
 	}
 
-	locker, err := gormlock.NewGormLocker(db, "w1")
+	var nowFunc gormlock.NowFunc = func() time.Time {
+		return time.Now()
+	}
+	locker, err := gormlock.NewGormLocker(db, "w1",
+		gormlock.WithNowFunc(nowFunc),
+		gormlock.WithDefaultJobIdentifier(nowFunc, time.Second),
+	)
 	if err != nil {
 		// handle the error
 	}
@@ -85,20 +93,30 @@ func main() {
 	time.Sleep(5 * time.Second)
 }
 
-
 ```
 
 ## Prerequisites
 
-- The table cron_job_locks needs to exist in the database. This can be achieved, as an example, using gorm automigrate functionality `db.Automigrate(&CronJobLock{})`
-- In order to uniquely identify the job, the locker uses the unique combination of the job name + timestamp (by default with precision to seconds).
+- The table cron_job_locks needs to exist in the database. This can be achieved, as an example, using gorm automigrate
+  functionality `db.Automigrate(&CronJobLock{})`.
+- To uniquely identify the job, the locker uses the unique combination of the job name + timestamp (by default with
+  precision to seconds).
+- Make sure the now function is consistent between gorm and gocron lock, e.g gorm use UTC time, the same must be used
+  for gocron lock.
+
+## Demo
+
+- Run the docker-compose to start the db service.
+- Run `demo.go`.
 
 ## FAQ
 
 - Q: The locker uses the unique combination of the job name + timestamp with seconds precision, how can I change that?
-    - A: It's possible to change the timestamp precision used to uniquely identify the job, here is an example to set an hour precision:
+    - A: It's possible to change the timestamp precision used to uniquely identify the job, here is an example to set an
+      hour precision:
       ```go
-      locker, err := gormlock.NewGormLocker(db, "local", gormlock.WithDefaultJobIdentifier(60 * time.Minute))
+      var nowFunc gormlock.NowFunc = func() time.Time {return time.Now()}
+      locker, err := gormlock.NewGormLocker(db, "local", gormlock.WithDefaultJobIdentifier(nowFunc, 60 * time.Minute))
       ```
 - Q: But what about if we want to write our own implementation:
     - A: It's possible to set how to create the job identifier:

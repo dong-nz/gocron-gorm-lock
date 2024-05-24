@@ -7,15 +7,20 @@ import (
 
 type LockOption func(*GormLocker)
 
+func WithNowFunc(f NowFunc) LockOption {
+	return func(l *GormLocker) {
+		l.nowFunc = f
+	}
+}
 func WithJobIdentifier(f func(ctx context.Context, key string) string) LockOption {
 	return func(l *GormLocker) {
 		l.jobIdentifier = f
 	}
 }
 
-func WithDefaultJobIdentifier(precision time.Duration) LockOption {
+func WithDefaultJobIdentifier(nowFunc NowFunc, precision time.Duration) LockOption {
 	return func(l *GormLocker) {
-		l.jobIdentifier = defaultJobIdentifier(precision)
+		l.jobIdentifier = defaultJobIdentifier(nowFunc, precision)
 	}
 }
 

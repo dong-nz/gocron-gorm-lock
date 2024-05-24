@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	gormlock "github.com/go-co-op/gocron-gorm-lock"
+	gormlock "github.com/dong-nz/gocron-gorm-lock"
 	"github.com/go-co-op/gocron/v2"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -11,18 +11,25 @@ import (
 )
 
 func main() {
-	connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d", "localhost", "postgres", "postgres", "bifrost", 5432)
-	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{Logger: logger.Default.LogMode(logger.Info), NowFunc: func() time.Time {
-		return time.Now().UTC()
-	}})
+	connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d", "localhost", "postgres", "postgres", "demo", 5433)
+	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{Logger: logger.Default.LogMode(logger.Info)})
 
+	//, NowFunc: func() time.Time {
+	//		return time.Now().UTC()
+	//	}
 	// We need the table to store the job execution
 	err = db.AutoMigrate(&gormlock.CronJobLock{})
 	if err != nil {
 		// handle the error
 	}
 
-	locker, err := gormlock.NewGormLocker(db, "w1")
+	var nowFunc gormlock.NowFunc = func() time.Time {
+		return time.Now().UTC()
+	}
+	locker, err := gormlock.NewGormLocker(db, "w1",
+		gormlock.WithNowFunc(nowFunc),
+		gormlock.WithDefaultJobIdentifier(nowFunc, time.Second),
+	)
 	if err != nil {
 		// handle the error
 	}
