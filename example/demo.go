@@ -11,23 +11,21 @@ import (
 )
 
 func main() {
+	var nowFunc gormlock.NowFunc = func() time.Time {
+		return time.Now().UTC()
+	}
 	connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d", "localhost", "postgres", "postgres", "demo", 5433)
-	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{Logger: logger.Default.LogMode(logger.Info)})
-
-	//, NowFunc: func() time.Time {
-	//		return time.Now().UTC()
-	//	}
+	db, err := gorm.Open(postgres.Open(connStr), &gorm.Config{
+		NowFunc: nowFunc,
+		Logger:  logger.Default.LogMode(logger.Info)})
+	
 	// We need the table to store the job execution
 	err = db.AutoMigrate(&gormlock.CronJobLock{})
 	if err != nil {
 		// handle the error
 	}
 
-	var nowFunc gormlock.NowFunc = func() time.Time {
-		return time.Now().UTC()
-	}
 	locker, err := gormlock.NewGormLocker(db, "w1",
-		gormlock.WithNowFunc(nowFunc),
 		gormlock.WithDefaultJobIdentifier(nowFunc, time.Second),
 	)
 	if err != nil {
