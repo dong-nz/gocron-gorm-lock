@@ -46,13 +46,11 @@ func NewGormLocker(db *gorm.DB, worker string, options ...LockOption) (*GormLock
 		interval: defaultCleanInterval,
 	}
 
+	// make sure job identifier function uses nowFunc the same as gorm config
+	gl.jobIdentifier = defaultJobIdentifier(gl.db.NowFunc, defaultPrecision)
+
 	for _, option := range options {
 		option(gl)
-	}
-
-	// make sure job identifier function uses nowFunc the same as gorm config
-	if gl.jobIdentifier == nil {
-		gl.jobIdentifier = defaultJobIdentifier(gl.db.NowFunc, defaultPrecision)
 	}
 
 	go func() {
